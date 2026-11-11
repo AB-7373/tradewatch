@@ -44,6 +44,39 @@ def run_analysis(start, end, predictor_name="baseline", cfg=None, capital=100000
             "start_capital": capital, "final_capital": final}
 
 
+def buy_and_hold(feats, cost):
+    """Benchmark: buy at the first bar's open, sell at the last close, pay the same cost."""
+    return float(feats["close"].iloc[-1] / feats["open"].iloc[0] - 1 - cost)
+
+
+def summarize(r, cfg):
+    """Plain, JSON-ready summary of a backtest. The CLI, compare.py and the
+    dashboard all use this, so they always show the same numbers."""
+    rep, t = r["report"], r["trades"]
+    wins = sum(1 for x in t if x["ret"] > 0)
+    return {
+        "period": [str(r["feats"].index[0]), str(r["feats"].index[-1])],
+        "bars_graded": rep["n"],
+        "accuracy": rep["accuracy"],
+        "majority_class": rep["majority_class"],
+        "majority_accuracy": rep["majority_accuracy"],
+        "class_freq": rep["class_freq"],
+        "picked_freq": rep["picked_freq"],
+        "brier": {c: {k: v[k] for k in ("brier", "lazy_brier", "skill")}
+                  for c, v in rep["classes"].items()},
+        "settings": {"entry": cfg.entry, "exit": cfg.exit, "persist": cfg.persist,
+                     "cooldown": cfg.cooldown, "cost": cfg.cost},
+        "trades": len(t),
+        "wins": wins,
+        "win_rate": wins / len(t) if t else None,
+        "pending_orders": {k: v for k, v in r["pending"].items() if v},
+        "start_capital": r["start_capital"],
+        "final_capital": r["final_capital"],
+        "strategy_return": r["final_capital"] / r["start_capital"] - 1,
+        "buy_and_hold_return": buy_and_hold(r["feats"], cfg.cost),
+    }
+
+
 def poll(predictor_name="baseline", cfg=None, state_file=None):
     """Live mode: only looks at NEW, finished bars since last run. Run it by hand."""
     cfg = cfg or Cfg()
