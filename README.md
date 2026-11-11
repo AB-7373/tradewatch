@@ -84,7 +84,7 @@ pytest
 ## Deploying on Streamlit Community Cloud
 
 1. Push the repo to GitHub. `venv/`, `state.json`, `jev_cache.json` and `.streamlit/secrets.toml` are git-ignored.
-2. On [share.streamlit.io](https://share.streamlit.io), create a new app. Pick the repo, branch `main` and main file `app.py`. Under *Advanced settings*, choose Python 3.10 or newer.
+2. On [share.streamlit.io](https://share.streamlit.io), create a new app. Pick the repo, branch `main` and main file `app.py`. Any Python from 3.10 to 3.14 works. `requirements.txt` picks a matching numpy version automatically.
 3. **Secrets are optional.** Without a key, the public app runs the baseline formula, and OpenJev results come from the bundled window, so nobody can spend your tokens. To allow new OpenJev calls, add these under *Settings → Secrets*:
    ```toml
    TYPESAFE_API_KEY = "sk-codiv-..."
