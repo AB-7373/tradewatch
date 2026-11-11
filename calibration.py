@@ -15,7 +15,18 @@ def calibration_report(preds, labels):
     df = preds.join(labels.rename("label")).dropna(subset=["label"])
     out = {"n": len(df)}
     pcols = [f"p_{c}" for c in CLASSES]
-    out["accuracy"] = float((df[pcols].idxmax(axis=1).str[2:] == df["label"]).mean())
+    picked = df[pcols].idxmax(axis=1).str[2:]                # the model's top choice each bar
+    out["accuracy"] = float((picked == df["label"]).mean())
+
+    # Honest yardsticks. "Random = 33%" is only true if the three outcomes are
+    # equally common. Usually they are not, so the fair bar to beat is
+    # "always guess whatever happens most often".
+    freq = df["label"].value_counts(normalize=True).reindex(CLASSES, fill_value=0.0)
+    out["class_freq"] = {c: float(freq[c]) for c in CLASSES}
+    out["majority_class"] = str(freq.idxmax())
+    out["majority_accuracy"] = float(freq.max())
+    out["picked_freq"] = {c: float((picked == c).mean()) for c in CLASSES}
+
     out["classes"] = {}
     for c in CLASSES:
         p = df[f"p_{c}"]
