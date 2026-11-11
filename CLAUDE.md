@@ -60,4 +60,8 @@ Goal: make it correct, honest, tested, and polished enough to demo and present (
 - **Redesign the dashboard so it looks hand-made rather than template/AI-generated** (restrained palette, no emoji clutter, clear story: verdict → calibration → trades).
 - Old Jev numbers in comparison.csv are pre-fix; label them so in REPORT.md.
 
+### Status (2026-11-11)
+Tasks 0–14, 16 and all amendments are done and pushed to github.com/AB-7373/tradewatch. 45 offline tests pass. One post-fix OpenJev run was made (92 calls, window 14 Sep – 8 Oct 2026); those answers are bundled in `sample_data/jev_answers.json`.
+Remaining: task 15. The user deploys on share.streamlit.io, then pastes the live link into README.md ("Live demo") and REPORT.md section 7.
+
 When everything is done, give the user a short plain-language summary of what changed and how to demo it in 2 minutes.
