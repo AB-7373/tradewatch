@@ -1,4 +1,4 @@
-import json, os, time
+import hashlib, json, os, time
 import numpy as np
 import requests
 import config
@@ -65,9 +65,13 @@ class JevPredictor:
         return {f"p_{c}": float(probs.get(c, 0.0)) for c in config.CLASSES}
 
     def predict(self, ts, row):
-        key = f"{config.MODEL}|{ts}|{config.HORIZON}|{config.FLAT_BAND}"
+        state = describe(row)
+        # The key includes a fingerprint of the exact text sent, so if the prompt
+        # ever changes, old cached answers are not silently reused.
+        digest = hashlib.md5(state.encode()).hexdigest()[:12]
+        key = f"{config.MODEL}|{ts}|{config.HORIZON}|{config.FLAT_BAND}|{digest}"
         if key not in self.cache:
-            self.cache[key] = self._parse(self._ask(describe(ts, row)))
+            self.cache[key] = self._parse(self._ask(state))
             self.new_calls += 1
             if self.new_calls % 20 == 0:
                 self.flush()
