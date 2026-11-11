@@ -1,7 +1,7 @@
 import json, os
 import pandas as pd
 import config
-from data import get_bars
+from data import MARKET_TZ, drop_unfinished, get_bars
 from features import add_features
 from predictor import BaselinePredictor, JevPredictor
 from calibration import make_labels, calibration_report
@@ -43,9 +43,10 @@ def poll(predictor_name="baseline", cfg=None):
         with open(config.STATE_FILE) as f:
             state = json.load(f)
     runner = Runner(cfg, state)
-    today = pd.Timestamp.today().normalize()
-    feats = add_features(get_bars((today - pd.Timedelta(days=12)).date(),
-                                  (today + pd.Timedelta(days=1)).date()))
+    today = pd.Timestamp.now(tz=MARKET_TZ).normalize()
+    bars = get_bars((today - pd.Timedelta(days=12)).date(),
+                    (today + pd.Timedelta(days=1)).date())
+    feats = add_features(drop_unfinished(bars))     # never consume a half-finished bar
     if runner.last_ts:
         feats = feats[feats.index.astype(str) > runner.last_ts]
     else:
