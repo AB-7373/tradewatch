@@ -1,138 +1,124 @@
-# TradeWatch ⏱️📈
+# TradeWatch
 
-A **shadow-testing harness** to test whether an AI model's stock market predictions can be trusted before putting real money on the line.
+A shadow-testing harness for AI market predictions. It replays hourly NIFTY 50 prices one bar at a time, asks a model for the probability that the next three hours go up, down or stay flat, grades those probabilities against what really happened, and paper-trades them under a strict entry/exit state machine. It never places a real order.
 
-TradeWatch replays historical hourly NIFTY 50 prices bar by bar (never letting the model see the future), asks an AI for direction probabilities, grades how honest those probabilities are via **Brier score calibration**, applies a strict institutional entry/exit state machine, and compounds simulated rupee returns.
+The question it answers: **can this model's confidence be trusted, and would acting on it have paid off?**
 
----
+![TradeWatch dashboard](docs/dashboard.png)
 
-## Key Features
+**Live demo:** _add your Streamlit link here_ · **Write-up:** [REPORT.md](REPORT.md)
 
-1. **Zero Future Lookahead**: All technical features (rolling returns, volatility, trend vs. moving average) are calculated strictly on past and current bars.
-2. **Probability Verification (Calibration)**: Grades predicted $P(\text{up}), P(\text{down}), P(\text{flat})$ against actual forward 3-hour outcomes. Computes multi-class accuracy, Brier scores, and Brier skill against a naive constant baseline.
-3. **Institutional Execution State Machine**:
-   - **Persistence Filter**: Requires confidence to clear a threshold (e.g. 85%) for several consecutive bars before entering.
-   - **Hysteresis Exit**: Exits only when confidence falls below a lower threshold (e.g. 60%), preventing whipsaw.
-   - **Cooldown**: Enforces a rest period after exiting before considering a new entry.
-   - **Realistic Friction**: Deducts a 0.05% cost per round trip (brokerage & slippage).
-4. **Dual Interfaces**: Full-featured CLI (`cli.py`), scenario comparison matrix (`compare.py`), and interactive Streamlit web dashboard (`app.py`).
+## Result so far
 
----
+Neither predictor's confidence can be trusted yet.
 
-## Project Structure
+- **OpenJev**, on 89 graded hours (17 Sep – 7 Oct 2026): 39.3% accuracy, below the 41.6% you get by always guessing "down". It scored worse than a lazy average forecast on all three outcomes (Brier skill −0.17, −0.33, −0.42).
+- **Baseline formula**, on 411 graded hours (Aug – Nov 2026): 42.3% accuracy, against 41.1% for always guessing "up". It was also worse than lazy on all three outcomes.
 
-```
-tradewatch/
-├── config.py         # Global settings (ticker, flat band, horizon, API URLs)
-├── data.py           # Hourly OHLC price fetcher via Yahoo Finance (yfinance)
-├── features.py       # Past-only returns, volatility, and trend calculations
-├── predictor.py      # Baseline formula predictor & OpenJev API client
-├── calibration.py   # Ground-truth forward labels, Brier score, and skill calculations
-├── signals.py        # Machine and Runner classes for stateful entry/exit rules
-├── trades.py         # P&L compounding and fee deduction
-├── pipeline.py       # Backtesting and incremental live polling coordinator
-├── compare.py        # Scenario matrix runner (Strict, Medium, Loose vs Buy-and-Hold)
-├── cli.py            # Command-line interface
-├── app.py            # Streamlit web dashboard
-├── requirements.txt  # Python package dependencies
-└── context.md        # Detailed guide and reference documentation
-```
+At strict settings, the filter correctly declined to trade the baseline at all. Details are in [REPORT.md](REPORT.md).
 
----
+## How it works
 
-## Installation & Setup
+1. **Prices.** Hourly NIFTY 50 bars come from Yahoo Finance (`data.py`). The app falls back to a bundled one-year sample if Yahoo is unreachable.
+2. **Features, past only** (`features.py`). These are the 1h, 5h and 20h returns, 20-hour volatility, and the price versus its 20-hour average. The text sent to the model contains **no date and no index name**, so a language model cannot recall what happened next.
+3. **Predictor** (`predictor.py`). There are two choices:
+   - `baseline`: a one-line trend formula. It is free and needs no key.
+   - `jev`: OpenJev via `api.codiv.ai`. Answers are cached on disk, keyed by the exact prompt text.
+4. **Grading** (`calibration.py`). Labels say what really happened over the next 3 bars: up or down by more than 0.1%, otherwise flat. The report covers:
+   - accuracy, set against the real class frequencies and the "always guess the most common outcome" accuracy;
+   - the Brier score for each class, and Brier skill against a lazy forecaster that always predicts the average;
+   - reliability tables showing whether "70% sure" comes true about 70% of the time.
+5. **Entry/exit state machine** (`signals.py`). Long positions watch P(up) and shorts watch P(down). There are three rules:
+   - **Persistence:** the probability must stay at or above the entry line for N bars in a row.
+   - **Hysteresis:** exit only when it falls below a lower exit line.
+   - **Cooldown:** rest for some bars after each exit.
+6. **Execution** (`signals.Runner`). A decision on bar *t* uses bar *t*'s close, so the order fills at **bar t+1's open**. A signal on the very last bar stays pending.
+7. **Money** (`trades.py`). Each trade's return has a round-trip cost deducted, and the account compounds in rupees.
+
+Backtest and live poll drive the **same `Runner` code** (`pipeline.replay`). A test checks that running in chunks, saving and restoring state in between, gives exactly the same trades as one continuous run.
+
+## Setup
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/<your-username>/tradewatch.git
 cd tradewatch
-
-# 2. Create and activate a virtual environment
 python -m venv venv
-source venv/bin/activate    # On Windows: venv\Scripts\activate
-
-# 3. Install dependencies
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Optional: Set OpenJev API Key
-To test real AI predictions via OpenJev (hosted at [codiv.ai](https://codiv.ai)):
+To use OpenJev (optional; this spends free-tier API tokens):
+
 ```bash
 export TYPESAFE_BASE_URL="https://api.codiv.ai"
-export TYPESAFE_API_KEY="sk-codiv-xxxx"
-```
-*(Without a key, the system defaults to the `baseline` formula predictor, which requires no external services.)*
-
----
-
-## How to Run
-
-### 1. Command Line Interface (CLI)
-
-**Run an offline backtest with the Baseline Predictor:**
-```bash
-python cli.py analyze --start 2026-07-01 --end 2026-10-01 --predictor baseline
+export TYPESAFE_API_KEY="sk-codiv-..."      # never commit this
 ```
 
-**Loosen filters to observe mechanics:**
+## Usage
+
 ```bash
-python cli.py analyze --start 2026-07-01 --end 2026-10-01 --entry 0.55 --persist 2 --exit 0.45
-```
+# Backtest with the free baseline predictor (end date is exclusive)
+python cli.py analyze --start 2026-08-11 --end 2026-11-11
 
-**Run an OpenJev test (start with a 1-week range):**
-```bash
-python cli.py analyze --start 2026-10-01 --end 2026-10-08 --predictor jev
-```
+# Loosen the rules to see the mechanics trade; change the cost; get JSON
+python cli.py analyze --start 2026-08-11 --end 2026-11-11 --entry 0.55 --persist 2 --exit 0.45
+python cli.py analyze --start 2026-08-11 --end 2026-11-11 --cost 0.001 --json
 
-**Check live market bar incrementally:**
-```bash
-python cli.py poll --predictor baseline
-```
+# OpenJev on the window whose answers are bundled (no API calls)
+python cli.py analyze --start 2026-09-14 --end 2026-10-08 --predictor jev
 
----
+# Strict / Medium / Loose presets side by side against buy-and-hold
+python compare.py 2026-08-11 2026-11-11 baseline
+python compare.py 2026-09-14 2026-10-08 baseline jev
 
-### 2. Scenario Comparison Matrix
+# Live check: processes only new, finished hourly bars; state kept in state.json
+python cli.py poll
 
-Run multiple rule presets (Strict, Medium, Loose) side-by-side against Buy-and-Hold:
-```bash
-python compare.py 2026-07-01 2026-10-01 baseline
-```
-This prints the comparison table and saves `comparison.csv`.
-
----
-
-### 3. Streamlit Web Dashboard
-
-Launch the interactive app:
-```bash
+# Dashboard
 streamlit run app.py
+
+# Tests (no network needed)
+pytest
 ```
 
-Features:
-- Parameter sliders for entry, exit, streak length, and cooldown.
-- Accuracy, total trades, and final rupee equity metrics.
-- Calibration reliability charts for UP, DOWN, and FLAT classes.
-- Historical price trajectory and individual trade logs.
-- Manual live poll button.
+## Deploying on Streamlit Community Cloud
 
----
-
-## Deployment to Streamlit Community Cloud
-
-1. Push this repository to GitHub (ensure `venv/`, `state.json`, and `jev_cache.json` are in `.gitignore`).
-2. Go to [share.streamlit.io](https://share.streamlit.io) and create a **New app**.
-3. Select your repository, set the branch to `main`, and the main file path to `app.py`.
-4. In **Settings > Secrets**, add your API keys:
+1. Push the repo to GitHub. `venv/`, `state.json`, `jev_cache.json` and `.streamlit/secrets.toml` are git-ignored.
+2. On [share.streamlit.io](https://share.streamlit.io), create a new app. Pick the repo, branch `main` and main file `app.py`. Under *Advanced settings*, choose Python 3.10 or newer.
+3. **Secrets are optional.** Without a key, the public app runs the baseline formula, and OpenJev results come from the bundled window, so nobody can spend your tokens. To allow new OpenJev calls, add these under *Settings → Secrets*:
    ```toml
-   TYPESAFE_API_KEY = "sk-codiv-xxxx"
+   TYPESAFE_API_KEY = "sk-codiv-..."
    TYPESAFE_BASE_URL = "https://api.codiv.ai"
+   JEV_PASSCODE = "something-only-you-know"   # new calls require this passcode
    ```
-5. Deploy.
 
----
+## Project layout
 
-## Limitations & Simplifications
+```
+config.py       settings: ticker, horizon (3 bars), flat band (0.1%), API URL
+data.py         Yahoo download, bundled-sample fallback, drop unfinished bars
+features.py     past-only features + the anonymous text sent to the model
+predictor.py    baseline formula and OpenJev client with prompt-keyed cache
+calibration.py  labels, accuracy vs. majority class, Brier score and skill
+signals.py      Cfg, Machine (persistence/hysteresis/cooldown), Runner (next-bar-open fills)
+trades.py       per-trade return (long and short) and compounding
+pipeline.py     backtest, live poll, summary, equity curve (one shared replay loop)
+cli.py          command line (analyze / poll, --json)
+compare.py      Strict / Medium / Loose vs. buy-and-hold
+app.py          Streamlit dashboard
+tests/          offline pytest suite
+sample_data/    one year of NIFTY hourly bars + post-fix OpenJev answers
+```
 
-- **Simulated Execution**: Entries and exits execute at the bar close with a fixed 0.05% friction cost; live execution experiences slippage and spread variance.
-- **Hourly Data Granularity**: Yahoo Finance provides approximately 730 days of hourly historical data.
-- **Sample Size**: A few hundred bars produce initial observations rather than statistical proof. Results should be interpreted as an evaluation of forecast calibration rather than a guaranteed trading strategy.
+## Limitations
+
+- **Fills.** Orders fill at the next bar's open, with one flat cost per round trip (default 0.05%). Real orders also face spread and slippage that vary.
+- **Overnight gaps.** NIFTY trades 9:15–15:30, and the last hourly bar is only 15 minutes long. Near the close, a "3-bar" horizon spans the overnight gap, and a signal on the last bar fills at the next morning's open.
+- **The index is not tradable directly.** P&L assumes a hypothetical instrument that tracks NIFTY 50 exactly and can be shorted freely.
+- **One account.** Long and short trades compound in a single chain, ordered by exit time, as if the whole account backs each trade.
+- **Small samples.** A few hundred hours and a handful of trades are a demonstration, not statistical proof. One lucky trade can dominate the result; see the report.
+- **Data depth.** Yahoo only provides about 730 days of hourly data.
+- **OpenJev is not TypeSafe's Jev.** It is an independent open-source server that copies Jev's API, so results here are not a verdict on the original model.
+- **Pre-fix results.** An earlier version (before these fixes) sent the date and index name to the model and used a wrong short-return formula. Those early Jev numbers are kept in the report for transparency, but they are not comparable.
+- **No hosted API.** The brief mentions a JSON API underneath the interfaces. Here that is `pipeline.summarize()` and `cli.py --json`; no web server was built, on purpose.
+- **Live mode** is manual on purpose, with no scheduler. On the dashboard, live state lasts only for the browser session.
