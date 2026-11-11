@@ -1,4 +1,16 @@
 TradeWatch: Full Build Guide, Code and Context
+
+> **Note (Nov 2026):** this is the *original* build guide, kept for history. The code in the repo has since been corrected and extended:
+> - short-return formula fixed;
+> - no date or index name sent to the model;
+> - prompt-keyed cache;
+> - unfinished live bars dropped;
+> - fills at the next bar's open;
+> - honest yardsticks;
+> - tests;
+> - a redesigned dashboard.
+>
+> The code below is therefore out of date. See README.md and REPORT.md for the current version.
 A beginner-friendly side project: test whether an AI's stock predictions can be trusted, using paper trades only (no real money).
 0. Context (paste this into a new chat if you ever need to resume)
 • Project: TradeWatch, a "shadow-testing harness". It replays old NIFTY hourly prices bar by bar, asks an AI (Jev / OpenJev) for the chance of up / down / flat over the next few hours, grades how honest those chances are (calibration), applies a strict entry/exit rule, and counts paper profit in rupees. It never places real orders.
