@@ -20,6 +20,27 @@ def test_backtest_runs_and_compounds():
     assert s["trades"] == len(r["trades"])
 
 
+def test_equity_curve_starts_at_capital_and_ends_at_final():
+    r = pipeline.run_analysis("x", "y", "baseline", LOOSE, 100000, bars=fake_bars(400, seed=3))
+    curve = pipeline.equity_curve(r["feats"], r["trades"], 100000)
+    assert curve.iloc[0] == pytest.approx(100000)
+    # last value = final capital, except the round-trip cost of a still-open trade
+    open_cost = sum(1 for t in r["trades"] if t["status"] == "OPEN") * LOOSE.cost * 100000
+    assert curve.iloc[-1] == pytest.approx(r["final_capital"], abs=open_cost * 1.2 + 1)
+
+
+def test_bundled_sample_used_when_yahoo_fails(monkeypatch):
+    import data
+
+    def boom(*a, **k):
+        raise RuntimeError("rate limited")
+
+    monkeypatch.setattr(data, "get_bars", boom)
+    bars, source = data.load_bars("2026-09-01", "2026-10-01")
+    assert source == "sample" and len(bars) > 100
+    assert bars.index.min() >= pd.Timestamp("2026-09-01", tz="Asia/Kolkata")
+
+
 def test_backtest_decisions_do_not_depend_on_future_bars():
     """Trades that finished before bar N are identical whether or not we also
     feed the bars after N. If the past changed, the future was leaking in."""

@@ -1,0 +1,18 @@
+[theme]
+base = "light"
+primaryColor = "#24446b"
+backgroundColor = "#faf9f6"
+secondaryBackgroundColor = "#f0eee8"
+textColor = "#1c1c1a"
+borderColor = "#dedad1"
+font = "sans-serif"
+headingFont = "serif"
+baseRadius = "small"
+showSidebarBorder = true
+chartCategoricalColors = ["#24446b", "#b04a32", "#2f7a55", "#8a8478"]
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

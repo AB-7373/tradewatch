@@ -4,17 +4,29 @@ import requests
 import config
 from features import describe
 
+# Read-only snapshot of real OpenJev answers (post-fix prompt) shipped with the
+# repo, so the public demo can show Jev's results without an API key.
+SNAPSHOT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "sample_data", "jev_answers.json")
+
 
 class BaselinePredictor:
-    """Simple formula guesser. Works with no API key."""
+    """Simple formula guesser. Works with no API key.
+
+    It measures the trend in 'volatility units' and leans up if price is above
+    its 20-hour average, down if below. It never favours 'flat'.
+    """
     name = "baseline"
 
     def predict(self, ts, row):
-        z = row.trend / (row.vol_20h * np.sqrt(20) + 1e-9)   # trend measured in 'volatility units'
+        z = row.trend / (row.vol_20h * np.sqrt(20) + 1e-9)
         logits = np.array([z, -z, 0.0])
         p = np.exp(logits - logits.max())
         p /= p.sum()
-        return {"p_up": p[0], "p_down": p[1], "p_flat": p[2]}
+        return {"p_up": float(p[0]), "p_down": float(p[1]), "p_flat": float(p[2])}
+
+    def missing(self, feats):
+        return 0
 
     def flush(self):
         pass
@@ -27,11 +39,26 @@ class JevPredictor:
     def __init__(self):
         self.cache = {}
         self.new_calls = 0
-        if os.path.exists(config.CACHE_FILE):
-            with open(config.CACHE_FILE) as f:
-                self.cache = json.load(f)
+        for path in (SNAPSHOT_FILE, config.CACHE_FILE):     # local cache wins
+            if os.path.exists(path):
+                with open(path) as f:
+                    self.cache.update(json.load(f))
+
+    @staticmethod
+    def key(ts, row):
+        # The key includes a fingerprint of the exact text sent, so if the prompt
+        # ever changes, old cached answers are not silently reused.
+        digest = hashlib.md5(describe(row).encode()).hexdigest()[:12]
+        return f"{config.MODEL}|{ts}|{config.HORIZON}|{config.FLAT_BAND}|{digest}"
+
+    def missing(self, feats):
+        """How many bars would need a NEW (paid) API call."""
+        return sum(self.key(ts, row) not in self.cache for ts, row in feats.iterrows())
 
     def _ask(self, state):
+        if not config.API_KEY:
+            raise RuntimeError("No OpenJev API key set (TYPESAFE_API_KEY), and these bars "
+                               "are not in the cache.")
         h, b = config.HORIZON, config.FLAT_BAND * 100
         body = {
             "model": config.MODEL,
@@ -65,18 +92,15 @@ class JevPredictor:
         return {f"p_{c}": float(probs.get(c, 0.0)) for c in config.CLASSES}
 
     def predict(self, ts, row):
-        state = describe(row)
-        # The key includes a fingerprint of the exact text sent, so if the prompt
-        # ever changes, old cached answers are not silently reused.
-        digest = hashlib.md5(state.encode()).hexdigest()[:12]
-        key = f"{config.MODEL}|{ts}|{config.HORIZON}|{config.FLAT_BAND}|{digest}"
+        key = self.key(ts, row)
         if key not in self.cache:
-            self.cache[key] = self._parse(self._ask(state))
+            self.cache[key] = self._parse(self._ask(describe(row)))
             self.new_calls += 1
             if self.new_calls % 20 == 0:
                 self.flush()
         return self.cache[key]
 
     def flush(self):
-        with open(config.CACHE_FILE, "w") as f:
-            json.dump(self.cache, f)
+        if self.new_calls:                         # nothing new -> don't rewrite the file
+            with open(config.CACHE_FILE, "w") as f:
+                json.dump(self.cache, f)

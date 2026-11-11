@@ -49,6 +49,22 @@ def buy_and_hold(feats, cost):
     return float(feats["close"].iloc[-1] / feats["open"].iloc[0] - 1 - cost)
 
 
+def equity_curve(feats, trades, capital):
+    """Account value at every bar: banked P&L of finished trades plus the
+    paper gain/loss of any trade still running (marked at each bar's close)."""
+    close = feats["close"]
+    value = pd.Series(float(capital), index=feats.index)
+    for t in trades:                        # trades as returned by apply_capital
+        entry, exit_ = pd.Timestamp(t["entry_time"]), pd.Timestamp(t["exit_time"])
+        stake = t["equity"] - t["pnl"]       # account size when this trade's result is booked
+        move = close / t["entry_price"] - 1
+        gross = move if t["side"] == "long" else -move
+        running = (feats.index >= entry) & (feats.index < exit_)
+        value[running] += stake * gross[running]
+        value[feats.index >= exit_] += t["pnl"]
+    return value
+
+
 def summarize(r, cfg):
     """Plain, JSON-ready summary of a backtest. The CLI, compare.py and the
     dashboard all use this, so they always show the same numbers."""
@@ -77,14 +93,10 @@ def summarize(r, cfg):
     }
 
 
-def poll(predictor_name="baseline", cfg=None, state_file=None):
-    """Live mode: only looks at NEW, finished bars since last run. Run it by hand."""
+def poll_step(state, predictor_name="baseline", cfg=None):
+    """One live check, given the saved state (or None on the first run).
+    Only NEW, finished bars since the last check are processed."""
     cfg = cfg or Cfg()
-    state_file = state_file or config.STATE_FILE
-    state = None
-    if os.path.exists(state_file):
-        with open(state_file) as f:
-            state = json.load(f)
     runner = Runner(cfg, state)
     today = pd.Timestamp.now(tz=MARKET_TZ).normalize()
     bars = get_bars((today - pd.Timedelta(days=12)).date(),
@@ -95,11 +107,24 @@ def poll(predictor_name="baseline", cfg=None, state_file=None):
     else:
         feats = feats.tail(10)                      # first run: warm up on the last 10 bars
     if feats.empty:
-        return {"new_bars": 0, "last_bar": runner.last_ts, "state": runner.to_dict()}
+        return {"new_bars": 0, "last_bar": runner.last_ts,
+                "positions": runner.all_trades(), "state": runner.to_dict()}
     preds = predict_frame(feats, build_predictor(predictor_name))
     replay(runner, feats, preds)
-    with open(state_file, "w") as f:
-        json.dump(runner.to_dict(), f, indent=2)
     return {"new_bars": len(feats), "last_bar": runner.last_ts,
             "last_probs": {k: round(float(v), 4) for k, v in preds.iloc[-1].items()},
             "positions": runner.all_trades(), "state": runner.to_dict()}
+
+
+def poll(predictor_name="baseline", cfg=None, state_file=None):
+    """Live mode for the CLI: state is remembered in state.json between runs."""
+    state_file = state_file or config.STATE_FILE
+    state = None
+    if os.path.exists(state_file):
+        with open(state_file) as f:
+            state = json.load(f)
+    out = poll_step(state, predictor_name, cfg)
+    if out["new_bars"]:
+        with open(state_file, "w") as f:
+            json.dump(out["state"], f, indent=2)
+    return out

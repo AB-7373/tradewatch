@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 import yfinance as yf
 from config import TICKER
@@ -19,6 +21,43 @@ def get_bars(start, end, ticker=TICKER):
     if df.index.tz is None:
         df.index = df.index.tz_localize(MARKET_TZ)
     return df.tz_convert(MARKET_TZ)
+
+
+SAMPLE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample_data", "nifty_1h.csv")
+
+
+def load_sample(start=None, end=None):
+    """Bundled copy of NIFTY hourly bars, used when Yahoo is unreachable
+    (Yahoo often rate-limits shared cloud servers)."""
+    df = pd.read_csv(SAMPLE_FILE, index_col=0)
+    df.index = pd.to_datetime(df.index, utc=True).tz_convert(MARKET_TZ)
+    if start is not None:
+        df = df[df.index >= pd.Timestamp(str(start), tz=MARKET_TZ)]
+    if end is not None:
+        df = df[df.index < pd.Timestamp(str(end), tz=MARKET_TZ)]
+    return df
+
+
+def load_bars(start, end):
+    """Try Yahoo first; fall back to the bundled sample. Returns (bars, source)."""
+    try:
+        return get_bars(start, end), "yahoo"
+    except Exception as e:                       # network error, rate limit, no data
+        sample = load_sample(start, end)
+        if len(sample) < 30:
+            raise RuntimeError(f"Yahoo Finance failed ({e}) and the bundled sample has no data "
+                               f"for {start} to {end}.") from e
+        return sample, "sample"
+
+
+def save_sample(days=365, path=SAMPLE_FILE):
+    """Refresh the bundled sample:  python -c "import data; data.save_sample()" """
+    today = pd.Timestamp.now(tz=MARKET_TZ).normalize()
+    bars = drop_unfinished(get_bars((today - pd.Timedelta(days=days)).date(),
+                                    (today + pd.Timedelta(days=1)).date()))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    bars.round(2).to_csv(path)
+    return len(bars)
 
 
 def drop_unfinished(bars, now=None):
