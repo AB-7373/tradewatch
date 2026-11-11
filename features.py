@@ -8,6 +8,7 @@ def add_features(bars):
     logc = np.log(c)
     r = logc.diff()
     f = pd.DataFrame(index=bars.index)
+    f["open"] = bars["Open"]   # not a model input; used to fill orders at the next bar's open
     f["close"] = c
     f["ret_1h"] = r
     f["ret_5h"] = logc.diff(5)
