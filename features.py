@@ -17,8 +17,13 @@ def add_features(bars):
     return f.dropna()
 
 
-def describe(ts, row):
-    """Turn numbers into a short text the AI reads as its 'state'."""
-    return (f"NIFTY 50 index, hourly bars. As of {ts}: last 1h return {row.ret_1h*100:.2f}%, "
+def describe(row):
+    """Turn numbers into a short text the AI reads as its 'state'.
+
+    Deliberately anonymous: no date and no index name. A language model may have
+    read news about a given week, so telling it "NIFTY 50 on 2026-10-07" could leak
+    what happened next. It only gets the numbers.
+    """
+    return (f"An equity index, hourly bars. Last 1h return {row.ret_1h*100:.2f}%, "
             f"5h return {row.ret_5h*100:.2f}%, 20h return {row.ret_20h*100:.2f}%, "
             f"hourly volatility {row.vol_20h*100:.2f}%, price vs 20h average {row.trend*100:.2f}%.")
